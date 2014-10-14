@@ -31,18 +31,8 @@ $req = array(
     "threeDSPaReq" => (isset($_REQUEST['PaReq']) ? $_REQUEST['PaReq'] : null)
 );
 
-// Data must be sorted by key
-ksort($req);
-
-// Build the signature field and concatenate the key to the end
-$signature_fields = http_build_query($req) . $pre_shared_key;
-
-// Make a hash of the fields
-$hash = hash($hashing_method, $signature_fields);
-
-// Add Signature field to the end of the request. If you are using the the default hashing
-// method(SHA512) it does not need to be sent
-$req['signature'] = ($hashing_method != "SHA512" ? "{" . $hashing_method . "}" : "") . $hash;
+// Add Signature field to the end of the request.
+$req['signature'] = createSignature($req, $pre_shared_key, $hashing_method);
 
 
 $ch = curl_init('https://gateway.cardstream.com/direct/');
@@ -81,11 +71,8 @@ if ($res['responseCode'] == 65802) {
     // Remove the signature as this isn't hashed in the return
     unset($res['signature']);
 
-    // Sort the returned array
-    ksort($res);
-
     // The returned hash will always be SHA512
-    if ($return_signature == hash("SHA512", http_build_query($res) . $pre_shared_key)) {
+    if ($return_signature == createSignature($res, $pre_shared_key, "SHA512")) {
 
         echo "<p>Signature Check OK!</p>" . PHP_EOL;
 
@@ -113,4 +100,44 @@ if ($res['responseCode'] == 65802) {
         echo "<p>Failed to take payment: " . htmlentities($res['responseMessage']) . "</p>" . PHP_EOL;
 
     }
+}
+
+
+function createSignature(array $data, $key, $algo = null) {
+
+	$algos = array(
+		'SHA512' => true,
+		'SHA256' => true,
+		'SHA1' => true,
+		'MD5' => true,
+		'CRC32' => true,
+	);
+
+	if ($algo === null) {
+		$algo = 'SHA512';
+	}
+	
+	if (!$key || !is_string($key) || $key === '' ||
+		!$algo || !is_string($algo) || ($algo = strtoupper($algo)) === '' || !isset($algos[$algo]) ||
+	    !$data || !is_array($data)) {
+		return null;
+	}		
+	
+	ksort($data);
+
+	// Create the URL encoded signature string
+	$ret = http_build_query($data, '', '&');
+
+	// Normalise all line endings (CRNL|NLCR|NL|CR) to just NL (%0A)
+	$ret = preg_replace('/%0D%0A|%0A%0D|%0A|%0D/i', '%0A', $ret);
+	
+	// Hash the signature string and the key together
+	$ret = hash($algo, $ret . $key);
+	
+	// Prefix the algorithm if not the default
+	if ($algo !== 'SHA512') {
+		$ret = '{' . $algo . '}' . $ret;
+	}
+
+	return $ret;	
 }
